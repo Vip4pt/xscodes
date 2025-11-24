@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>SSR / SS / VMESS / VLESS / Trojan 在线解析工具</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center p-4">
+  <div class="max-w-4xl w-full bg-gray-800 rounded-2xl shadow-2xl p-6">
+    <h1 class="text-2xl font-bold mb-4">代理链接在线解析工具</h1>
+
+    <textarea id="input" rows="6" placeholder="在这里粘贴 ss / ssr / vmess / vless / trojan 链接（支持多行）..." class="w-full bg-gray-900 p-3 rounded-xl border border-gray-700 focus:outline-none"></textarea>
+
+    <div class="flex gap-3 mt-4">
+      <button onclick="parseLinks()" class="bg-blue-600 hover:bg-blue-700 rounded-xl px-4 py-2">解析</button>
+      <button onclick="clearAll()" class="bg-red-600 hover:bg-red-700 rounded-xl px-4 py-2">清空</button>
+    </div>
+
+    <pre id="output" class="mt-6 bg-black/50 p-4 rounded-xl overflow-x-auto text-sm"></pre>
+  </div>
+
+<script>
+function b64Decode(data) {
+    data = data.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = data.length % 4;
+    if (pad) data += '='.repeat(4 - pad);
+    try {
+        return decodeURIComponent(escape(atob(data)));
+    } catch (e) {
+        return atob(data);
+    }
+}
+
+function parseSS(url) {
+    url = url.replace('ss://','');
+    let tag = "";
+    if (url.includes('#')) {
+        [url, tag] = url.split('#');
+    }
+
+    let decoded = b64Decode(url);
+    let [methodPwd, hostPort] = decoded.split('@');
+    let [method, password] = methodPwd.split(':');
+    let [server, port] = hostPort.split(':');
+
+    return {
+        type: 'ss',
+        tag: decodeURIComponent(tag || ''),
+        server,
+        port: Number(port),
+        method,
+        password
+    };
+}
+
+function parseSSR(url) {
+    url = url.replace('ssr://','');
+    let decoded = b64Decode(url);
+
+    let [main, query] = decoded.split('/?');
+    let [server, port, protocol, method, obfs, pwd_b64] = main.split(':');
+
+    let password = b64Decode(pwd_b64);
+    let params = {};
+
+    if (query) {
+        query.split('&').forEach(p => {
+            let [k, v] = p.split('=');
+            params[k] = b64Decode(v);
+        });
+    }
+
+    return {
+        type: 'ssr',
+        server,
+        port: Number(port),
+        protocol,
+        method,
+        obfs,
+        password,
+        remarks: params.remarks || '',
+        group: params.group || ''
+    };
+}
+
+function parseVmess(url) {
+    let decoded = b64Decode(url.replace('vmess://',''));
+    let obj = JSON.parse(decoded);
+    return { type: 'vmess', ...obj };
+}
+
+function parseCommon(url) {
+    const u = new URL(url);
+    const params = {};
+    for (const [key, value] of u.searchParams.entries()) {
+        params[key] = value;
+    }
+
+    return {
+        type: u.protocol.replace(':',''),
+        server: u.hostname,
+        port: Number(u.port),
+        username: u.username,
+        tag: decodeURIComponent(u.hash.replace('#','')),
+        params
+    };
+}
+
+function parseLinks() {
+    const input = document.getElementById('input').value.trim();
+    const out = [];
+
+    input.split(/\n+/).forEach(line => {
+        let url = line.trim();
+        if (!url) return;
+
+        try {
+            if (url.startsWith('ss://')) out.push(parseSS(url));
+            else if (url.startsWith('ssr://')) out.push(parseSSR(url));
+            else if (url.startsWith('vmess://')) out.push(parseVmess(url));
+            else if (url.startsWith('vless://') || url.startsWith('trojan://')) out.push(parseCommon(url));
+            else out.push({ error: '不支持的协议', input: url });
+        } catch (e) {
+            out.push({ error: '解析失败', input: url, message: e.message });
+        }
+    });
+
+    document.getElementById('output').textContent = JSON.stringify(out, null, 2);
+}
+
+function clearAll() {
+    document.getElementById('input').value = '';
+    document.getElementById('output').textContent = '';
+}
+</script>
+</body>
+</html>
