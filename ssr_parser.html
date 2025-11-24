@@ -1,174 +1,150 @@
+<!-- 已根据你的新布局要求重构页面结构和功能：
+1. 三栏布局（左输入 | 右上统计 | 右下地区查看）
+2. 地区按钮切换（可视化）
+3. 地区显示为原始节点链接
+4. 可切换显示所有节点JSON） -->
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh">
 <head>
-<meta charset="utf-8" />
-<title>代理节点解析与分类统计工具</title>
-<script src="https://cdn.tailwindcss.com">document.getElementById('parseBtn').onclick = parseLinks;
-document.getElementById('clearBtn').onclick = clearAll;
-</script>
+<meta charset="UTF-8" />
+<title>节点统计与地区查看工具</title>
+<script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-900 text-white min-h-screen p-6">
+<body class="bg-gray-100 p-4">
+<div class="grid grid-cols-3 gap-4 h-screen">
 
-<div class="max-w-6xl mx-auto bg-gray-800 rounded-2xl shadow-2xl p-6 space-y-6">
-
-  <h1 class="text-2xl font-bold">SSR / SS / VMESS / VLESS / Trojan 节点解析 + 分类统计</h1>
-
-  <textarea id="input" rows="6" placeholder="在这里粘贴代理链接（支持多行）..."
-    class="w-full bg-gray-900 p-3 rounded-xl border border-gray-700 focus:outline-none"></textarea>
-
-  <div class="flex flex-wrap gap-3">
-    <button id="parseBtn" class="bg-blue-600 hover:bg-blue-700 rounded-xl px-4 py-2">解析并统计</button>
-    <button id="clearBtn" class="bg-red-600 hover:bg-red-700 rounded-xl px-4 py-2">清空</button>
+  <!-- 左侧输入 -->
+  <div class="col-span-1 flex flex-col">
+    <h2 class="text-xl font-bold mb-2">粘贴节点地址</h2>
+    <textarea id="input" class="flex-1 border p-2 rounded" placeholder="支持 ss / ssr / vmess / vless / trojan...每行一个"></textarea>
+    <button id="parseBtn" class="mt-2 bg-blue-600 text-white p-2 rounded">开始解析</button>
   </div>
 
-  <!-- 统计结果 -->
-  <div id="stats" class="grid md:grid-cols-3 gap-4"></div>
+  <!-- 右侧 -->
+  <div class="col-span-2 grid grid-rows-2 gap-4">
 
-  <!-- 地区筛选 -->
-  <div>
-    <h2 class="text-lg font-semibold mb-2">按照地区查看节点</h2>
-    <select id="regionSelect" onchange="filterByRegion()" class="bg-gray-900 border border-gray-700 rounded-xl p-2"></select>
+    <!-- 右上：统计 -->
+    <div class="bg-white p-3 rounded shadow overflow-auto">
+      <h2 class="text-xl font-bold mb-2">统计信息</h2>
+      <div id="typeStats" class="mb-2"></div>
+      <div id="regionStats" class="mb-2"></div>
+      <div>
+        <strong>名称合集：</strong>
+        <div id="nameList" class="text-sm mt-1 max-h-24 overflow-auto"></div>
+      </div>
+      <button id="toggleJson" class="mt-3 bg-gray-700 text-white px-3 py-1 rounded">显示/隐藏 全部节点JSON</button>
+      <pre id="jsonOutput" class="hidden text-xs bg-black text-green-400 p-2 mt-2 overflow-auto max-h-40"></pre>
+    </div>
+
+    <!-- 右下：地区按钮 + 节点列表 -->
+    <div class="bg-white p-3 rounded shadow flex flex-col">
+      <h2 class="text-xl font-bold mb-2">按地区查看节点</h2>
+      <div id="regionButtons" class="mb-2 flex flex-wrap gap-2"></div>
+      <textarea id="nodeOutput" class="flex-1 border p-2 rounded text-sm" placeholder="这里显示选择地区的节点地址"></textarea>
+    </div>
+
   </div>
-
-  <!-- 输出 -->
-  <pre id="output" class="bg-black/50 p-4 rounded-xl overflow-x-auto text-sm"></pre>
-
 </div>
 
 <script>
-function b64Decode(data) {
-  data = data.replace(/-/g, '+').replace(/_/g, '/');
-  const pad = data.length % 4;
-  if (pad) data += '='.repeat(4 - pad);
-  try { return decodeURIComponent(escape(atob(data))); }
-  catch { return atob(data); }
-}
-
-function detectRegion(name = '') {
-  name = name.toLowerCase();
-  const map = {
-    '香港':'HK','hongkong':'HK','hk':'HK',
-    '台湾':'TW','taiwan':'TW','tw':'TW',
-    '日本':'JP','japan':'JP','东京':'JP',
-    '新加坡':'SG','singapore':'SG','sg':'SG',
-    '美国':'US','los':'US','new':'US','us':'US',
-    '韩国':'KR','korea':'KR'
-  };
-  for (let k in map) if (name.includes(k)) return map[k];
-  return '其他';
-}
-
-function parseSS(url) {
-  url = url.replace('ss://','');
-  let tag = "";
-  if (url.includes('#')) [url, tag] = url.split('#');
-  let decoded = b64Decode(url);
-  let [methodPwd, hostPort] = decoded.split('@');
-  let [method, password] = methodPwd.split(':');
-  let [server, port] = hostPort.split(':');
-  return { type:'ss', tag:decodeURIComponent(tag||''), server, port:Number(port), method, password };
-}
-
-function parseSSR(url) {
-  url = url.replace('ssr://','');
-  let decoded = b64Decode(url);
-  let [main, query] = decoded.split('/?');
-  let [server, port, protocol, method, obfs, pwd] = main.split(':');
-  let password = b64Decode(pwd);
-  let params = {};
-  if (query) query.split('&').forEach(p=>{ let [k,v]=p.split('='); params[k]=b64Decode(v); });
-  return { type:'ssr', server, port:Number(port), protocol, method, obfs, password, tag:params.remarks || '' };
-}
-
-function parseVmess(url) {
-  let obj = JSON.parse(b64Decode(url.replace('vmess://','')));
-  return { type:'vmess', ...obj, tag: obj.ps || '' };
-}
-
-function parseCommon(url) {
-  const u = new URL(url);
-  const params = {};
-  u.searchParams.forEach((v,k)=>params[k]=v);
-  return { type:u.protocol.replace(':',''), server:u.hostname, port:Number(u.port), uuid:u.username, tag:decodeURIComponent(u.hash.replace('#','')), params };
+const regions = {
+  HK:['香港','HK','hong'],
+  TW:['台湾','TW'],
+  JP:['日本','JP','东京'],
+  SG:['新加坡','SG'],
+  US:['美国','US','洛杉矶','硅谷','纽约'],
+  KR:['韩国','KR','首尔'],
+  OTHER:[]
 }
 
 let allNodes = [];
 
-function parseLinks() {
-  const input = document.getElementById('input').value.trim();
-  const output = [];
-  allNodes = [];
-
-  input.split(/
-+/).forEach(line => {
-    let url = line.trim(); if (!url) return;
-    try {
-      let obj;
-      if (url.startsWith('ss://')) obj = parseSS(url);
-      else if (url.startsWith('ssr://')) obj = parseSSR(url);
-      else if (url.startsWith('vmess://')) obj = parseVmess(url);
-      else if (url.startsWith('vless://') || url.startsWith('trojan://')) obj = parseCommon(url);
-      else obj = { error:'不支持', raw:url };
-
-      if (!obj.error) {
-        obj.region = detectRegion(obj.tag || obj.server);
-        allNodes.push(obj);
-      }
-      output.push(obj);
-    } catch(e) { output.push({ error:'解析失败', raw:url, msg:e.message }); }
-  });
-
-  renderStats(allNodes);
-  renderRegions(allNodes);
-  document.getElementById('output').textContent = JSON.stringify(output,null,2);
+function safeBase64Decode(str){
+  try{
+    str = str.replace(/-/g,'+').replace(/_/g,'/');
+    return decodeURIComponent(escape(atob(str)));
+  }catch(e){return str}
 }
 
-function renderStats(nodes) {
-  const types = {};
-  const regions = {};
-  const names = [];
-
-  nodes.forEach(n=>{
-    types[n.type] = (types[n.type]||0)+1;
-    regions[n.region] = (regions[n.region]||0)+1;
-    if(n.tag) names.push(n.tag);
-  });
-
-  document.getElementById('stats').innerHTML = `
-    <div class="bg-gray-900 p-4 rounded-xl">
-      <h3 class="font-bold mb-2">类型数量</h3>
-      <pre>${JSON.stringify(types,null,2)}</pre>
-    </div>
-    <div class="bg-gray-900 p-4 rounded-xl">
-      <h3 class="font-bold mb-2">地区数量</h3>
-      <pre>${JSON.stringify(regions,null,2)}</pre>
-    </div>
-    <div class="bg-gray-900 p-4 rounded-xl">
-      <h3 class="font-bold mb-2">节点名称集合</h3>
-      <div class="text-sm max-h-40 overflow-y-auto">${names.join('<br>')}</div>
-    </div>
-  `;
+function detectRegion(text){
+  for(const r in regions){
+    for(const k of regions[r]){
+      if(text.toLowerCase().includes(k.toLowerCase())) return r
+    }
+  }
+  return 'OTHER'
 }
 
-function renderRegions(nodes) {
-  const select = document.getElementById('regionSelect');
-  const regions = [...new Set(nodes.map(n=>n.region))];
-  select.innerHTML = '<option value="all">所有地区</option>' + regions.map(r=>`<option value="${r}">${r}</option>`).join('');
+function parseNode(line){
+  let type = line.split('://')[0]
+  let name = ''
+  let server = ''
+
+  if(type === 'vmess'){
+    const data = JSON.parse(safeBase64Decode(line.replace('vmess://','')))
+    name = data.ps || ''
+    server = data.add || ''
+  }else{
+    const arr = line.split('#')
+    name = decodeURIComponent(arr[1]||'')
+    server = arr[0]
+  }
+
+  const region = detectRegion(name + server)
+
+  return { type, name, server, region, raw: line }
 }
 
-function filterByRegion(){
-  const r = document.getElementById('regionSelect').value;
-  const list = r==='all'? allNodes : allNodes.filter(n=>n.region===r);
-  document.getElementById('output').textContent = JSON.stringify(list,null,2);
+function renderRegionButtons(regionCount){
+  const box=document.getElementById('regionButtons')
+  box.innerHTML=''
+  Object.keys(regionCount).forEach(r=>{
+    const btn=document.createElement('button')
+    btn.className='px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-700'
+    btn.innerText = r + ' ('+regionCount[r]+')'
+    btn.onclick=()=>{
+      const list = allNodes.filter(n=>n.region===r).map(n=>n.raw).join('\n')
+      document.getElementById('nodeOutput').value=list
+    }
+    box.appendChild(btn)
+  })
 }
 
-function clearAll(){
-  document.getElementById('input').value='';
-  document.getElementById('output').textContent='';
-  document.getElementById('stats').innerHTML='';
-  document.getElementById('regionSelect').innerHTML='';
+function renderStats(){
+  const typeCount={}
+  const regionCount={}
+  const names=[]
+
+  allNodes.forEach(n=>{
+    typeCount[n.type]=(typeCount[n.type]||0)+1
+    regionCount[n.region]=(regionCount[n.region]||0)+1
+    if(n.name) names.push(n.name)
+  })
+
+  document.getElementById('typeStats').innerHTML = '<b>类型统计</b>：<br>' +  Object.entries(typeCount).map(i=>i[0]+': '+i[1]).join(' | ')
+  document.getElementById('regionStats').innerHTML = '<b>地区统计</b>：<br>' + Object.entries(regionCount).map(i=>i[0]+': '+i[1]).join(' | ')
+  document.getElementById('nameList').innerText = names.join('\n')
+
+  document.getElementById('jsonOutput').textContent = JSON.stringify(allNodes,null,2)
+
+  renderRegionButtons(regionCount)
+}
+
+
+document.getElementById('parseBtn').onclick=function(){
+  const lines = document.getElementById('input').value.split(/\r?\n+/).filter(Boolean)
+  allNodes = []
+
+  lines.forEach(l=>{
+    try{allNodes.push(parseNode(l.trim()))}catch(e){}
+  })
+
+  renderStats()
+}
+
+document.getElementById('toggleJson').onclick=function(){
+  document.getElementById('jsonOutput').classList.toggle('hidden')
 }
 </script>
-
 </body>
 </html>
